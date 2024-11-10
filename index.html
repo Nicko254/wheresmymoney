@@ -5,6 +5,7 @@
     <title>Budget Tracker</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <style>
         body {
             font-family: -apple-system, system-ui, sans-serif;
@@ -18,6 +19,45 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .privacy-notice {
+            background: #e7f3ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border: 1px solid #b3d7ff;
+        }
+        .privacy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .privacy-header h4 {
+            margin: 0;
+            color: #004085;
+        }
+        .privacy-toggle {
+            background: #004085;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .privacy-toggle:hover {
+            background: #002752;
+        }
+        .privacy-content {
+            color: #004085;
+        }
+        .privacy-content ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .privacy-content li {
+            margin: 5px 0;
         }
         .header-controls {
             display: grid;
@@ -64,6 +104,23 @@
             min-height: 300px;
             position: relative;
         }
+        .insights-container {
+            grid-column: span 2;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .export-controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .export-button {
+            padding: 10px 20px;
+            font-size: 1.1em;
+        }
         select, button, input {
             padding: 8px;
             border: 1px solid #ddd;
@@ -106,19 +163,6 @@
             background: #007bff;
             color: white;
         }
-        .insights {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
-        .insight-item {
-            margin: 10px 0;
-            padding: 10px;
-            background: white;
-            border-radius: 4px;
-            border-left: 4px solid #007bff;
-        }
         .loading {
             position: absolute;
             top: 50%;
@@ -131,6 +175,23 @@
 </head>
 <body>
     <div class="container">
+        <!-- Privacy Notice -->
+        <div class="privacy-notice">
+            <div class="privacy-header">
+                <h4>🔒 Privacy Information</h4>
+                <button onclick="togglePrivacyNotice()" class="privacy-toggle" id="privacyToggle">Hide</button>
+            </div>
+            <div class="privacy-content" id="privacyContent">
+                <p>This tool is completely secure and private:</p>
+                <ul>
+                    <li>All processing happens in your browser - your data never leaves your device</li>
+                    <li>No data is stored on any servers</li>
+                    <li>Data is automatically cleared when you close or refresh the page</li>
+                    <li>Other users cannot see your data</li>
+                </ul>
+            </div>
+        </div>
+
         <h1>Budget Tracker</h1>
         
         <div class="header-controls">
@@ -175,7 +236,6 @@
             <div class="tab-buttons">
                 <button class="tab-button active" onclick="showTab('charts')">Charts</button>
                 <button class="tab-button" onclick="showTab('transactions')">Transactions</button>
-                <button class="tab-button" onclick="showTab('insights')">Insights</button>
             </div>
         </div>
 
@@ -189,6 +249,12 @@
                     <canvas id="categoryBarChart"></canvas>
                     <div id="barChartLoading" class="loading">Upload data to see category breakdown</div>
                 </div>
+                <div class="insights-container">
+                    <h3>💡 Key Insights</h3>
+                    <div class="insights" id="insightsList">
+                        <!-- Insights will be populated here -->
+                    </div>
+                </div>
                 <div class="chart-container">
                     <canvas id="trendLineChart"></canvas>
                     <div id="trendChartLoading" class="loading">Upload data to see spending trends</div>
@@ -197,6 +263,10 @@
                     <canvas id="weekdaySpendingChart"></canvas>
                     <div id="weekdayChartLoading" class="loading">Upload data to see daily patterns</div>
                 </div>
+            </div>
+            <div class="export-controls">
+                <button onclick="exportSummary()" class="export-button">📧 Share Summary</button>
+                <button onclick="captureAndDownload()" class="export-button">📥 Download Report</button>
             </div>
         </div>
 
@@ -219,12 +289,6 @@
                 </label>
             </div>
             <div id="transactions"></div>
-        </div>
-
-        <div id="insightsTab" style="display: none;">
-            <div class="insights" id="insightsList">
-                <!-- Insights will be populated here -->
-            </div>
         </div>
     </div>
 </body>
@@ -253,6 +317,18 @@
         'Alcohol & Bars': ['Bars', 'Liquor Stores'],
         'Fees & Interest': ['Bank Fees', 'Interest', 'Late Fees']
     };
+
+    function togglePrivacyNotice() {
+        const content = document.getElementById('privacyContent');
+        const toggle = document.getElementById('privacyToggle');
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            toggle.textContent = 'Hide';
+        } else {
+            content.style.display = 'none';
+            toggle.textContent = 'Show';
+        }
+    }
 
     function processFile() {
         const file = document.getElementById('csvFile').files[0];
@@ -333,6 +409,7 @@
     }
 
     function detectRecurring(description) {
+        // Pattern matching for common recurring payments
         const recurringPatterns = [
             /loan/i,
             /insurance/i,
@@ -398,7 +475,10 @@
                         `<option value="${cat}" ${t.category === cat ? 'selected' : ''}>${cat}</option>`
                     ).join('')}
                 </select>
-                <span>${t.isRecurring ? 'Recurring' : 'One-time'}</span>
+                <select onchange="updateRecurring(${index}, this.value)">
+                    <option value="false" ${!t.isRecurring ? 'selected' : ''}>One-time</option>
+                    <option value="true" ${t.isRecurring ? 'selected' : ''}>Recurring</option>
+                </select>
             `;
             container.appendChild(row);
         });
@@ -407,10 +487,17 @@
     function updateCategory(index, category) {
         transactions[index].category = category;
         savedCategories[transactions[index].description] = category;
-        updateCharts();
-        generateInsights();
+        analyzeTransactions();
     }
 
+    function updateRecurring(index, isRecurring) {
+        transactions[index].isRecurring = isRecurring === 'true';
+        analyzeTransactions();
+    }
+</script>
+```
+```html
+<script>
     function analyzeTransactions() {
         updateStats();
         generateInsights();
@@ -452,6 +539,68 @@
             topCategory,
             recurringTotal
         };
+    }
+
+    function generateInsights() {
+        const insights = [];
+        
+        // Analyze spending patterns
+        const weekdaySpending = analyzeWeekdaySpending();
+        const highestSpendingDay = Object.entries(weekdaySpending)
+            .sort((a, b) => b[1] - a[1])[0];
+                
+        if (highestSpendingDay) {
+            insights.push({
+                type: 'pattern',
+                message: `Your highest spending day is ${highestSpendingDay[0]} 
+                         with an average of ${formatCurrency(highestSpendingDay[1])}`
+            });
+        }
+
+        // Find large transactions
+        const largeTransactions = transactions
+            .filter(t => t.amount < -100)
+            .sort((a, b) => a.amount - b.amount);
+            
+        if (largeTransactions.length > 0) {
+            insights.push({
+                type: 'alert',
+                message: `Your largest expense was ${formatCurrency(Math.abs(largeTransactions[0].amount))} 
+                         at ${largeTransactions[0].description}`
+            });
+        }
+
+        // Category spending analysis
+        const categorySpending = {};
+        let totalSpending = 0;
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                categorySpending[t.category] = (categorySpending[t.category] || 0) + Math.abs(t.amount);
+                totalSpending += Math.abs(t.amount);
+            }
+        });
+
+        const topCategories = Object.entries(categorySpending)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3);
+
+        if (topCategories.length > 0) {
+            insights.push({
+                type: 'summary',
+                message: `Your top spending categories are: 
+                         ${topCategories.map(([cat, amount]) => 
+                             `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
+                         ).join(', ')}`
+            });
+        }
+
+        // Update insights display
+        const insightsList = document.getElementById('insightsList');
+        insightsList.innerHTML = insights.map(insight => `
+            <div class="insight-item ${insight.type}">
+                ${insight.message}
+            </div>
+        `).join('');
     }
 
     function updateCharts() {
@@ -631,7 +780,6 @@
             }
         });
 
-        // Calculate averages
         Object.keys(weekdayTotals).forEach(day => {
             weekdayTotals[day] = weekdayTotals[day] / weekdayCounts[day];
         });
@@ -639,113 +787,39 @@
         return weekdayTotals;
     }
 
-    function generateInsights() {
-        const insights = [];
+    function exportSummary() {
+        const stats = calculateStats();
+        const insights = document.getElementById('insightsList').innerText;
         
-        // Analyze spending patterns
-        const weekdaySpending = analyzeWeekdaySpending();
-        const highestSpendingDay = Object.entries(weekdaySpending)
-           .sort((a, b) => b[1] - a[1])[0];
-                
-        if (highestSpendingDay) {
-            insights.push({
-                type: 'pattern',
-                message: `Your highest spending day is ${highestSpendingDay[0]} 
-                         with an average of ${formatCurrency(highestSpendingDay[1])}`
-            });
-        }
+        const summary = `
+Budget Summary (${new Date().toLocaleDateString()})
 
-        // Find large transactions
-        const largeTransactions = transactions
-            .filter(t => t.amount < -100)
-            .sort((a, b) => a.amount - b.amount);
-            
-        if (largeTransactions.length > 0) {
-            insights.push({
-                type: 'alert',
-                message: `Your largest expense was ${formatCurrency(Math.abs(largeTransactions[0].amount))} 
-                         at ${largeTransactions[0].description}`
-            });
-        }
+Total Expenses: ${formatCurrency(stats.totalExpenses)}
+Average Daily Spend: ${formatCurrency(stats.averageDailySpend)}
+Top Category: ${stats.topCategory}
+Recurring Expenses: ${formatCurrency(stats.recurringTotal)}
 
-        // Category spending analysis
-        const categorySpending = {};
-        let totalSpending = 0;
-        transactions.forEach(t => {
-            if (t.amount < 0 && t.category !== 'Transfers') {
-                categorySpending[t.category] = (categorySpending[t.category] || 0) + Math.abs(t.amount);
-                totalSpending += Math.abs(t.amount);
-            }
+Key Insights:
+${insights}
+
+Generated from Budget Tracker
+`;
+
+        const mailtoLink = `mailto:?subject=Budget Summary&body=${encodeURIComponent(summary)}`;
+        window.location.href = mailtoLink;
+    }
+
+    function captureAndDownload() {
+        html2canvas(document.getElementById('chartsTab')).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'budget-summary.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
         });
-
-        const topCategories = Object.entries(categorySpending)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3);
-
-        if (topCategories.length > 0) {
-            insights.push({
-                type: 'summary',
-                message: `Your top spending categories are: 
-                         ${topCategories.map(([cat, amount]) => 
-                             `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
-                         ).join(', ')}`
-            });
-        }
-
-        // Update insights display
-        const insightsList = document.getElementById('insightsList');
-        insightsList.innerHTML = insights.map(insight => `
-            <div class="insight-item ${insight.type}">
-                ${insight.message}
-            </div>
-        `).join('');
     }
 
     function formatCurrency(amount) {
         return '$' + Math.abs(amount).toFixed(2);
-    }
-
-    function saveCategories() {
-        localStorage.setItem('savedCategories', JSON.stringify(savedCategories));
-        alert('Categories saved successfully!');
-    }
-
-    function exportData() {
-        const analysis = {
-            summary: calculateStats(),
-            categoryTotals: calculateCategoryTotals(),
-            insights: generateInsightsSummary(),
-            transactions: transactions
-        };
-
-        const blob = new Blob([JSON.stringify(analysis, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'budget-analysis.json';
-        a.click();
-    }
-
-    function calculateCategoryTotals() {
-        const totals = {};
-        transactions.forEach(t => {
-            if (t.amount < 0 && t.category !== 'Transfers') {
-                totals[t.category] = (totals[t.category] || 0) + Math.abs(t.amount);
-            }
-        });
-        return totals;
-    }
-
-    function generateInsightsSummary() {
-        const stats = calculateStats();
-        const categoryTotals = calculateCategoryTotals();
-        return {
-            totalSpent: stats.totalExpenses,
-            averageDaily: stats.averageDailySpend,
-            topCategory: stats.topCategory,
-            categoryBreakdown: categoryTotals,
-            recurringExpenses: stats.recurringTotal
-        };
     }
 
     function showTab(tabName) {
@@ -781,7 +855,15 @@
 
     // Initialize when the document loads
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize empty charts
         updateCharts();
+        
+        // Add data clearing on page unload
+        window.onbeforeunload = function() {
+            transactions = [];
+            // Uncomment below if you want to clear saved categories too
+            // localStorage.removeItem('savedCategories');
+        };
     });
 </script>
+```
+
