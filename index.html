@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <title>Budget Tracker</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
-    <!-- Add date range picker -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <style>
         body {
@@ -63,6 +62,7 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             min-height: 300px;
+            position: relative;
         }
         select, button, input {
             padding: 8px;
@@ -119,11 +119,19 @@
             border-radius: 4px;
             border-left: 4px solid #007bff;
         }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2em;
+            color: #666;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Advanced Budget Tracker</h1>
+        <h1>Budget Tracker</h1>
         
         <div class="header-controls">
             <div>
@@ -175,15 +183,19 @@
             <div class="charts">
                 <div class="chart-container">
                     <canvas id="expensesPieChart"></canvas>
+                    <div id="pieChartLoading" class="loading">Upload data to see spending distribution</div>
                 </div>
                 <div class="chart-container">
                     <canvas id="categoryBarChart"></canvas>
+                    <div id="barChartLoading" class="loading">Upload data to see category breakdown</div>
                 </div>
                 <div class="chart-container">
                     <canvas id="trendLineChart"></canvas>
+                    <div id="trendChartLoading" class="loading">Upload data to see spending trends</div>
                 </div>
                 <div class="chart-container">
                     <canvas id="weekdaySpendingChart"></canvas>
+                    <div id="weekdayChartLoading" class="loading">Upload data to see daily patterns</div>
                 </div>
             </div>
         </div>
@@ -215,342 +227,561 @@
             </div>
         </div>
     </div>
+</body>
+</html>
+```html
+<script>
+    let transactions = [];
+    let charts = {};
+    let savedCategories = JSON.parse(localStorage.getItem('savedCategories') || '{}');
 
-    <script>
-        let transactions = [];
-        let charts = {};
-        let savedCategories = JSON.parse(localStorage.getItem('savedCategories') || '{}');
+    // Enhanced categories with subcategories
+    const categories = {
+        'Income': ['Salary', 'Transfers In', 'Refunds', 'Other Income'],
+        'Transfers': ['Internal Transfer', 'Savings', 'Investments'],
+        'Food & Dining': ['Groceries', 'Restaurants', 'Coffee & Cafes', 'Food Delivery'],
+        'Transportation': ['Fuel', 'Public Transport', 'Parking', 'Vehicle Maintenance'],
+        'Shopping': ['Clothing', 'Electronics', 'Home Goods', 'Online Shopping'],
+        'Bills & Utilities': ['Power', 'Internet', 'Phone', 'Insurance'],
+        'Health': ['Medical', 'Pharmacy', 'Fitness', 'Personal Care'],
+        'Entertainment': ['Movies', 'Sports', 'Games', 'Hobbies'],
+        'Home': ['Rent/Mortgage', 'Hardware', 'Maintenance', 'Furniture'],
+        'Pets': ['Food', 'Vet', 'Supplies', 'Care'],
+        'Education': ['Tuition', 'Books', 'Courses', 'Supplies'],
+        'Personal': ['Gifts', 'Charity', 'Personal Care'],
+        'Travel': ['Flights', 'Accommodation', 'Activities'],
+        'Alcohol & Bars': ['Bars', 'Liquor Stores'],
+        'Fees & Interest': ['Bank Fees', 'Interest', 'Late Fees']
+    };
 
-        // Enhanced categories with subcategories
-        const categories = {
-            'Income': ['Salary', 'Transfers In', 'Refunds', 'Other Income'],
-            'Transfers': ['Internal Transfer', 'Savings', 'Investments'],
-            'Food & Dining': ['Groceries', 'Restaurants', 'Coffee & Cafes', 'Food Delivery'],
-            'Transportation': ['Fuel', 'Public Transport', 'Parking', 'Vehicle Maintenance'],
-            'Shopping': ['Clothing', 'Electronics', 'Home Goods', 'Online Shopping'],
-            'Bills & Utilities': ['Power', 'Internet', 'Phone', 'Insurance'],
-            'Health': ['Medical', 'Pharmacy', 'Fitness', 'Personal Care'],
-            'Entertainment': ['Movies', 'Sports', 'Games', 'Hobbies'],
-            'Home': ['Rent/Mortgage', 'Hardware', 'Maintenance', 'Furniture'],
-            'Pets': ['Food', 'Vet', 'Supplies', 'Care'],
-            'Education': ['Tuition', 'Books', 'Courses', 'Supplies'],
-            'Personal': ['Gifts', 'Charity', 'Personal Care'],
-            'Travel': ['Flights', 'Accommodation', 'Activities'],
-            'Alcohol & Bars': ['Bars', 'Liquor Stores'],
-            'Fees & Interest': ['Bank Fees', 'Interest', 'Late Fees']
+    function processFile() {
+        const file = document.getElementById('csvFile').files[0];
+        if (!file) {
+            alert('Please select a file first.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            parseTransactions(e.target.result);
+            initializeDisplay();
+            analyzeTransactions();
+            hideLoadingMessages();
         };
+        reader.readAsText(file);
+    }
 
-        function processFile() {
-            const file = document.getElementById('csvFile').files[0];
-            if (!file) {
-                alert('Please select a file first.');
-                return;
+    function hideLoadingMessages() {
+        document.querySelectorAll('.loading').forEach(el => {
+            el.style.display = 'none';
+        });
+    }
+
+    function parseTransactions(csv) {
+        const lines = csv.split('\n');
+        transactions = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            
+            const [date, description, amount, balance] = lines[i].split(',');
+            if (!date || !amount) continue;
+
+            const parsedAmount = parseFloat(amount);
+            const category = autoCategorizeTransaction(description);
+            const isRecurring = detectRecurring(description);
+            
+            transactions.push({
+                date: date,
+                description: description,
+                amount: parsedAmount,
+                category: category,
+                isRecurring: isRecurring
+            });
+        }
+    }
+
+    function autoCategorizeTransaction(description) {
+        // Use saved categories first
+        const saved = savedCategories[description];
+        if (saved) return saved;
+
+        description = description.toLowerCase();
+        
+        // Enhanced categorization rules
+        const rules = [
+            { pattern: /transfer|tfr/i, category: 'Transfers' },
+            { pattern: /coffee|cafe|weta/i, category: 'Food & Dining' },
+            { pattern: /pak n save|countdown|new world|woolworths|fresh/i, category: 'Food & Dining' },
+            { pattern: /pet|vet/i, category: 'Pets' },
+            { pattern: /liquor|brew|bar/i, category: 'Alcohol & Bars' },
+            { pattern: /mitre 10|hardware|bunnings/i, category: 'Home' },
+            { pattern: /loan|interest|fee/i, category: 'Fees & Interest' },
+            { pattern: /z |mobil|fuel|gas/i, category: 'Transportation' },
+            { pattern: /medical|pharmacy|doctor|health/i, category: 'Health' },
+            { pattern: /movie|cinema|netflix/i, category: 'Entertainment' },
+            { pattern: /power|electricity|water|internet/i, category: 'Bills & Utilities' }
+        ];
+
+        for (const rule of rules) {
+            if (rule.pattern.test(description)) {
+                return rule.category;
             }
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                parseTransactions(e.target.result);
-                initializeDisplay();
-                analyzeTransactions();
-            };
-            reader.readAsText(file);
         }
 
-        function parseTransactions(csv) {
-            const lines = csv.split('\n');
-            transactions = [];
-            
-            for (let i = 1; i < lines.length; i++) {
-                if (!lines[i].trim()) continue;
-                
-                const [date, description, amount, balance] = lines[i].split(',');
-                if (!date || !amount) continue;
+        return 'Uncategorized';
+    }
 
-                const parsedAmount = parseFloat(amount);
-                const category = autoCategorizeTransaction(description);
-                const isRecurring = detectRecurring(description);
-                
-                transactions.push({
-                    date: date,
-                    description: description,
-                    amount: parsedAmount,
-                    category: category,
-                    isRecurring: isRecurring
-                });
-            }
+    function detectRecurring(description) {
+        const recurringPatterns = [
+            /loan/i,
+            /insurance/i,
+            /power/i,
+            /internet/i,
+            /netflix/i,
+            /spotify/i
+        ];
+
+        return recurringPatterns.some(pattern => pattern.test(description));
+    }
+
+    function filterTransactions() {
+        const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
+        const categoryFilter = document.getElementById('categoryFilter')?.value;
+        const amountFilter = document.getElementById('amountFilter')?.value;
+        const recurringOnly = document.getElementById('recurringOnly')?.checked;
+
+        const filtered = transactions.filter(t => {
+            const matchesSearch = t.description.toLowerCase().includes(searchTerm);
+            const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
+            const matchesAmount = filterByAmount(t.amount, amountFilter);
+            const matchesRecurring = !recurringOnly || t.isRecurring;
+
+            return matchesSearch && matchesCategory && matchesAmount && matchesRecurring;
+        });
+
+        displayTransactions(filtered);
+    }
+
+    function filterByAmount(amount, filter) {
+        amount = Math.abs(amount);
+        switch (filter) {
+            case 'under20': return amount < 20;
+            case '20to50': return amount >= 20 && amount < 50;
+            case '50to100': return amount >= 50 && amount < 100;
+            case 'over100': return amount >= 100;
+            default: return true;
         }
+    }
 
-        function autoCategorizeTransaction(description) {
-            // Use saved categories first
-            const saved = savedCategories[description];
-            if (saved) return saved;
+    function displayTransactions(transactionsToDisplay = transactions) {
+        const container = document.getElementById('transactions');
+        container.innerHTML = `
+            <div class="transaction-row">
+                <strong>Date</strong>
+                <strong>Description</strong>
+                <strong>Amount</strong>
+                <strong>Category</strong>
+                <strong>Type</strong>
+            </div>
+        `;
 
-            description = description.toLowerCase();
-            
-            // Enhanced categorization rules
-            const rules = [
-                { pattern: /transfer|tfr/i, category: 'Transfers' },
-                { pattern: /coffee|cafe|weta/i, category: 'Food & Dining' },
-                { pattern: /pak n save|countdown|new world|woolworths|fresh/i, category: 'Food & Dining' },
-                { pattern: /pet|vet/i, category: 'Pets' },
-                { pattern: /liquor|brew|bar/i, category: 'Alcohol & Bars' },
-                { pattern: /mitre 10|hardware|bunnings/i, category: 'Home' },
-                { pattern: /loan|interest|fee/i, category: 'Fees & Interest' },
-                { pattern: /z |mobil|fuel|gas/i, category: 'Transportation' },
-                { pattern: /medical|pharmacy|doctor|health/i, category: 'Health' },
-                { pattern: /movie|cinema|netflix/i, category: 'Entertainment' },
-                { pattern: /power|electricity|water|internet/i, category: 'Bills & Utilities' }
-            ];
+        transactionsToDisplay.forEach((t, index) => {
+            const row = document.createElement('div');
+            row.className = 'transaction-row' + (t.isRecurring ? ' recurring' : '');
+            row.innerHTML = `
+                <span>${t.date}</span>
+                <span>${t.description}</span>
+                <span class="${t.amount < 0 ? 'expense' : 'income'}">${formatCurrency(t.amount)}</span>
+                <select onchange="updateCategory(${index}, this.value)">
+                    ${Object.keys(categories).map(cat => 
+                        `<option value="${cat}" ${t.category === cat ? 'selected' : ''}>${cat}</option>`
+                    ).join('')}
+                </select>
+                <span>${t.isRecurring ? 'Recurring' : 'One-time'}</span>
+            `;
+            container.appendChild(row);
+        });
+    }
 
-            for (const rule of rules) {
-                if (rule.pattern.test(description)) {
-                    return rule.category;
+    function updateCategory(index, category) {
+        transactions[index].category = category;
+        savedCategories[transactions[index].description] = category;
+        updateCharts();
+        generateInsights();
+    }
+
+    function analyzeTransactions() {
+        updateStats();
+        generateInsights();
+        updateCharts();
+    }
+
+    function updateStats() {
+        const stats = calculateStats();
+        document.getElementById('totalExpenses').textContent = formatCurrency(stats.totalExpenses);
+        document.getElementById('avgDailySpend').textContent = formatCurrency(stats.averageDailySpend);
+        document.getElementById('topCategory').textContent = stats.topCategory;
+        document.getElementById('recurringTotal').textContent = formatCurrency(stats.recurringTotal);
+    }
+
+    function calculateStats() {
+        let totalExpenses = 0;
+        let categoryTotals = {};
+        let recurringTotal = 0;
+        
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                totalExpenses += Math.abs(t.amount);
+                categoryTotals[t.category] = (categoryTotals[t.category] || 0) + Math.abs(t.amount);
+                if (t.isRecurring) {
+                    recurringTotal += Math.abs(t.amount);
                 }
             }
+        });
 
-            return 'Uncategorized';
-        }
+        const topCategory = Object.entries(categoryTotals)
+            .sort((a, b) => b[1] - a[1])[0]?.[0] || 'None';
 
-        function detectRecurring(description) {
-            // Pattern matching for common recurring payments
-            const recurringPatterns = [
-                /loan/i,
-                /insurance/i,
-                /power/i,
-                /internet/i,
-                /netflix/i,
-                /spotify/i
-            ];
+        const uniqueDays = new Set(transactions.map(t => t.date)).size;
+        const averageDailySpend = totalExpenses / (uniqueDays || 1);
 
-            return recurringPatterns.some(pattern => pattern.test(description));
-        }
+        return {
+            totalExpenses,
+            averageDailySpend,
+            topCategory,
+            recurringTotal
+        };
+    }
 
-        function analyzeTransactions() {
-            // Calculate basic stats
-            updateStats();
-            
-            // Generate insights
-            generateInsights();
-            
-            // Update all charts
-            updateCharts();
-        }
+    function updateCharts() {
+        updatePieChart();
+        updateBarChart();
+        updateTrendLineChart();
+        updateWeekdaySpendingChart();
+    }
 
-        function updateStats() {
-            const stats = calculateStats();
-            
-            document.getElementById('totalExpenses').textContent = 
-                formatCurrency(stats.totalExpenses);
-            document.getElementById('avgDailySpend').textContent = 
-                formatCurrency(stats.averageDailySpend);
-            document.getElementById('topCategory').textContent = 
-                stats.topCategory;
-            document.getElementById('recurringTotal').textContent = 
-                formatCurrency(stats.recurringTotal);
-        }
+    function updatePieChart() {
+        const ctx = document.getElementById('expensesPieChart').getContext('2d');
+        const expensesByCategory = {};
+        
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
+            }
+        });
 
-        function calculateStats() {
-            let totalExpenses = 0;
-            let categoryTotals = {};
-            let recurringTotal = 0;
-            
-            transactions.forEach(t => {
-                if (t.amount < 0) {
-                    totalExpenses += Math.abs(t.amount);
-                    categoryTotals[t.category] = (categoryTotals[t.category] || 0) + Math.abs(t.amount);
-                    if (t.isRecurring) {
-                        recurringTotal += Math.abs(t.amount);
+        if (charts.pieChart) charts.pieChart.destroy();
+        charts.pieChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: Object.keys(expensesByCategory),
+                datasets: [{
+                    data: Object.values(expensesByCategory),
+                    backgroundColor: [
+                        '#ff6384', '#36a2eb', '#cc65fe', '#ffce56', '#4bc0c0',
+                        '#ff9f40', '#c9cbcf', '#9966ff', '#ff99cc', '#66ff99'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Expenses by Category'
+                    },
+                    legend: {
+                        position: 'right'
                     }
                 }
-            });
+            }
+        });
+    }
 
-            const topCategory = Object.entries(categoryTotals)
-                .sort((a, b) => b[1] - a[1])[0][0];
+    function updateBarChart() {
+        const ctx = document.getElementById('categoryBarChart').getContext('2d');
+        const expensesByCategory = {};
+        
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
+            }
+        });
 
-            const uniqueDays = new Set(transactions.map(t => t.date)).size;
-            const averageDailySpend = totalExpenses / uniqueDays;
+        if (charts.barChart) charts.barChart.destroy();
+        charts.barChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(expensesByCategory),
+                datasets: [{
+                    label: 'Total Spent',
+                    data: Object.values(expensesByCategory),
+                    backgroundColor: '#36a2eb'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Spending by Category'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
 
-            return {
-                totalExpenses,
-                averageDailySpend,
-                topCategory,
-                recurringTotal
-            };
-        }
+    function updateTrendLineChart() {
+        const ctx = document.getElementById('trendLineChart').getContext('2d');
+        const dailyTotals = {};
+        
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                if (!dailyTotals[t.date]) {
+                    dailyTotals[t.date] = 0;
+                }
+                dailyTotals[t.date] += Math.abs(t.amount);
+            }
+        });
 
-        function generateInsights() {
-            const insights = [];
-            
-            // Analyze spending patterns
-            const weekdaySpending = analyzeWeekdaySpending();
-            const highestSpendingDay = Object.entries(weekdaySpending)
-                .sort((a, b) => b[1] - a[1])[0];
+        const sortedDates = Object.keys(dailyTotals).sort();
+        const sortedTotals = sortedDates.map(date => dailyTotals[date]);
+
+        if (charts.trendChart) charts.trendChart.destroy();
+        charts.trendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sortedDates,
+                datasets: [{
+                    label: 'Daily Spending',
+                    data: sortedTotals,
+                    borderColor: '#4bc0c0',
+                    tension: 0.1,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Daily Spending Trend'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+    function updateWeekdaySpendingChart() {
+        const ctx = document.getElementById('weekdaySpendingChart').getContext('2d');
+        const weekdaySpending = analyzeWeekdaySpending();
+
+        const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const data = weekdays.map(day => weekdaySpending[day] || 0);
+
+        if (charts.weekdayChart) charts.weekdayChart.destroy();
+        charts.weekdayChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: weekdays,
+                datasets: [{
+                    label: 'Average Spending',
+                    data: data,
+                    backgroundColor: '#cc65fe'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Average Spending by Day of Week'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+    function analyzeWeekdaySpending() {
+        const weekdayTotals = {};
+        const weekdayCounts = {};
+        
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                const date = moment(t.date, 'D-MMM-YY');
+                const weekday = date.format('dddd');
+                weekdayTotals[weekday] = (weekdayTotals[weekday] || 0) + Math.abs(t.amount);
+                weekdayCounts[weekday] = (weekdayCounts[weekday] || 0) + 1;
+            }
+        });
+
+        // Calculate averages
+        Object.keys(weekdayTotals).forEach(day => {
+            weekdayTotals[day] = weekdayTotals[day] / weekdayCounts[day];
+        });
+
+        return weekdayTotals;
+    }
+
+    function generateInsights() {
+        const insights = [];
+        
+        // Analyze spending patterns
+        const weekdaySpending = analyzeWeekdaySpending();
+        const highestSpendingDay = Object.entries(weekdaySpending)
+           .sort((a, b) => b[1] - a[1])[0];
                 
+        if (highestSpendingDay) {
             insights.push({
                 type: 'pattern',
                 message: `Your highest spending day is ${highestSpendingDay[0]} 
                          with an average of ${formatCurrency(highestSpendingDay[1])}`
             });
+        }
 
-            // Find large transactions
-            const largeTransactions = transactions
-                .filter(t => t.amount < -100)
-                .sort((a, b) => a.amount - b.amount);
-                
-            if (largeTransactions.length > 0) {
-                insights.push({
-                    type: 'alert',
-                    message: `Your largest expense was ${formatCurrency(Math.abs(largeTransactions[0].amount))} 
-                             at ${largeTransactions[0].description}`
-                });
-            }
-
-           ```javascript
-            // Continuing generateInsights function...
+        // Find large transactions
+        const largeTransactions = transactions
+            .filter(t => t.amount < -100)
+            .sort((a, b) => a.amount - b.amount);
             
-            // Analyze recurring expenses
-            const recurringExpenses = transactions
-                .filter(t => t.isRecurring && t.amount < 0);
-                
-            if (recurringExpenses.length > 0) {
-                insights.push({
-                    type: 'info',
-                    message: `You have ${recurringExpenses.length} recurring expenses totaling 
-                             ${formatCurrency(Math.abs(recurringExpenses.reduce((sum, t) => sum + t.amount, 0)))} per month`
-                });
-            }
-
-            // Category spending analysis
-            const categorySpending = {};
-            transactions.forEach(t => {
-                if (t.amount < 0) {
-                    categorySpending[t.category] = (categorySpending[t.category] || 0) + Math.abs(t.amount);
-                }
+        if (largeTransactions.length > 0) {
+            insights.push({
+                type: 'alert',
+                message: `Your largest expense was ${formatCurrency(Math.abs(largeTransactions[0].amount))} 
+                         at ${largeTransactions[0].description}`
             });
+        }
 
-            const topCategories = Object.entries(categorySpending)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 3);
+        // Category spending analysis
+        const categorySpending = {};
+        let totalSpending = 0;
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                categorySpending[t.category] = (categorySpending[t.category] || 0) + Math.abs(t.amount);
+                totalSpending += Math.abs(t.amount);
+            }
+        });
 
+        const topCategories = Object.entries(categorySpending)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3);
+
+        if (topCategories.length > 0) {
             insights.push({
                 type: 'summary',
                 message: `Your top spending categories are: 
                          ${topCategories.map(([cat, amount]) => 
-                             `${cat} (${formatCurrency(amount)})`).join(', ')}`
+                             `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
+                         ).join(', ')}`
             });
+        }
 
-            // Analyze daily patterns
-            const dailyAverage = calculateDailyAverage();
-            const highSpendingDays = transactions
-                .filter(t => t.amount < -dailyAverage * 2)
-                .length;
+        // Update insights display
+        const insightsList = document.getElementById('insightsList');
+        insightsList.innerHTML = insights.map(insight => `
+            <div class="insight-item ${insight.type}">
+                ${insight.message}
+            </div>
+        `).join('');
+    }
 
-            if (highSpendingDays > 0) {
-                insights.push({
-                    type: 'alert',
-                    message: `You had ${highSpendingDays} days with spending more than 
-                             double your daily average of ${formatCurrency(dailyAverage)}`
-                });
+    function formatCurrency(amount) {
+        return '$' + Math.abs(amount).toFixed(2);
+    }
+
+    function saveCategories() {
+        localStorage.setItem('savedCategories', JSON.stringify(savedCategories));
+        alert('Categories saved successfully!');
+    }
+
+    function exportData() {
+        const analysis = {
+            summary: calculateStats(),
+            categoryTotals: calculateCategoryTotals(),
+            insights: generateInsightsSummary(),
+            transactions: transactions
+        };
+
+        const blob = new Blob([JSON.stringify(analysis, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'budget-analysis.json';
+        a.click();
+    }
+
+    function calculateCategoryTotals() {
+        const totals = {};
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                totals[t.category] = (totals[t.category] || 0) + Math.abs(t.amount);
             }
-
-            // Update insights display
-            const insightsList = document.getElementById('insightsList');
-            insightsList.innerHTML = insights.map(insight => `
-                <div class="insight-item ${insight.type}">
-                    ${insight.message}
-                </div>
-            `).join('');
-        }
-
-        function calculateDailyAverage() {
-            const expenses = transactions
-                .filter(t => t.amount < 0)
-                .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-            const uniqueDays = new Set(transactions.map(t => t.date)).size;
-            return expenses / uniqueDays;
-        }
-
-        function analyzeWeekdaySpending() {
-            const weekdayTotals = {};
-            const weekdayCounts = {};
-            
-            transactions.forEach(t => {
-                if (t.amount < 0) {
-                    const weekday = moment(t.date).format('dddd');
-                    weekdayTotals[weekday] = (weekdayTotals[weekday] || 0) + Math.abs(t.amount);
-                    weekdayCounts[weekday] = (weekdayCounts[weekday] || 0) + 1;
-                }
-            });
-
-            // Calculate averages
-            Object.keys(weekdayTotals).forEach(day => {
-                weekdayTotals[day] = weekdayTotals[day] / weekdayCounts[day];
-            });
-
-            return weekdayTotals;
-        }
-
-        function updateCharts() {
-            updatePieChart();
-            updateBarChart();
-            updateTrendLineChart();
-            updateWeekdaySpendingChart();
-        }
-
-        function formatCurrency(amount) {
-            return '$' + amount.toFixed(2);
-        }
-
-        function saveCategories() {
-            localStorage.setItem('savedCategories', JSON.stringify(savedCategories));
-            alert('Categories saved successfully!');
-        }
-
-        function exportData() {
-            const analysis = {
-                summary: calculateStats(),
-                categoryTotals: calculateCategoryTotals(),
-                insights: generateInsightsSummary(),
-                transactions: transactions
-            };
-
-            const blob = new Blob([JSON.stringify(analysis, null, 2)], 
-                                {type: 'application/json'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'budget-analysis.json';
-            a.click();
-        }
-
-        function showTab(tabName) {
-            // Hide all tabs
-            document.getElementById('chartsTab').style.display = 'none';
-            document.getElementById('transactionsTab').style.display = 'none';
-            document.getElementById('insightsTab').style.display = 'none';
-
-            // Show selected tab
-            document.getElementById(tabName + 'Tab').style.display = 'block';
-
-            // Update active button
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-        }
-
-        // Initialize the application
-        function initializeDisplay() {
-            populateCategoryFilter();
-            filterTransactions();
-            analyzeTransactions();
-        }
-
-        // Add event listeners when the document loads
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize empty charts
-            updateCharts();
         });
-    </script>
-</body>
-</html>
+        return totals;
+    }
+
+    function generateInsightsSummary() {
+        const stats = calculateStats();
+        const categoryTotals = calculateCategoryTotals();
+        return {
+            totalSpent: stats.totalExpenses,
+            averageDaily: stats.averageDailySpend,
+            topCategory: stats.topCategory,
+            categoryBreakdown: categoryTotals,
+            recurringExpenses: stats.recurringTotal
+        };
+    }
+
+    function showTab(tabName) {
+        document.querySelectorAll('[id$="Tab"]').forEach(tab => {
+            tab.style.display = 'none';
+        });
+        document.getElementById(tabName + 'Tab').style.display = 'block';
+
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
+    }
+
+    function populateCategoryFilter() {
+        const select = document.getElementById('categoryFilter');
+        const uniqueCategories = [...new Set(transactions.map(t => t.category))].sort();
+        
+        select.innerHTML = '<option value="all">All Categories</option>';
+        uniqueCategories.forEach(category => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            select.appendChild(option);
+        });
+    }
+
+    function initializeDisplay() {
+        populateCategoryFilter();
+        filterTransactions();
+        analyzeTransactions();
+    }
+
+    // Initialize when the document loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize empty charts
+        updateCharts();
+    });
+</script>
