@@ -82,17 +82,9 @@
             font-weight: bold;
             margin: 10px 0;
         }
-        .transaction-row {
-            display: grid;
-            grid-template-columns: 100px 1fr 100px 200px 100px;
-            gap: 10px;
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-            align-items: center;
-        }
         .charts {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 20px;
             margin: 20px 0;
         }
@@ -110,6 +102,24 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+        .income-summary {
+            grid-column: span 2;
+        }
+        .income-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .transaction-row {
+            display: grid;
+            grid-template-columns: 100px 1fr 100px 200px 100px;
+            gap: 10px;
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
         }
         .export-controls {
             margin-top: 20px;
@@ -120,6 +130,14 @@
         .export-button {
             padding: 10px 20px;
             font-size: 1.1em;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .export-button:hover {
+            background: #0056b3;
         }
         select, button, input {
             padding: 8px;
@@ -170,6 +188,13 @@
             transform: translate(-50%, -50%);
             font-size: 1.2em;
             color: #666;
+        }
+        .insight-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
         }
     </style>
 </head>
@@ -223,8 +248,8 @@
                 <div id="avgDailySpend" class="stat-value">$0</div>
             </div>
             <div class="stat-card">
-                <div>Top Category</div>
-                <div id="topCategory" class="stat-value">-</div>
+                <div>Total Income</div>
+                <div id="totalIncome" class="stat-value income">$0</div>
             </div>
             <div class="stat-card">
                 <div>Recurring Expenses</div>
@@ -249,12 +274,12 @@
                     <canvas id="categoryBarChart"></canvas>
                     <div id="barChartLoading" class="loading">Upload data to see category breakdown</div>
                 </div>
+                
                 <div class="insights-container">
                     <h3>💡 Key Insights</h3>
-                    <div class="insights" id="insightsList">
-                        <!-- Insights will be populated here -->
-                    </div>
+                    <div class="insights" id="insightsList"></div>
                 </div>
+
                 <div class="chart-container">
                     <canvas id="trendLineChart"></canvas>
                     <div id="trendChartLoading" class="loading">Upload data to see spending trends</div>
@@ -263,7 +288,14 @@
                     <canvas id="weekdaySpendingChart"></canvas>
                     <div id="weekdayChartLoading" class="loading">Upload data to see daily patterns</div>
                 </div>
+                
+                <div class="chart-container income-summary">
+                    <h3>Income Summary</h3>
+                    <div id="incomeSummary"></div>
+                    <canvas id="incomeChart"></canvas>
+                </div>
             </div>
+            
             <div class="export-controls">
                 <button onclick="exportSummary()" class="export-button">📧 Share Summary</button>
                 <button onclick="captureAndDownload()" class="export-button">📥 Download Report</button>
@@ -371,7 +403,7 @@
                 date: date,
                 description: description,
                 amount: parsedAmount,
-                category: category,
+                category: parsedAmount > 0 ? 'Income' : category,
                 isRecurring: isRecurring
             });
         }
@@ -409,7 +441,6 @@
     }
 
     function detectRecurring(description) {
-        // Pattern matching for common recurring payments
         const recurringPatterns = [
             /loan/i,
             /insurance/i,
@@ -495,8 +526,7 @@
         analyzeTransactions();
     }
 </script>
-```
-```html
+``````html
 <script>
     function analyzeTransactions() {
         updateStats();
@@ -507,13 +537,17 @@
     function updateStats() {
         const stats = calculateStats();
         document.getElementById('totalExpenses').textContent = formatCurrency(stats.totalExpenses);
+        document.getElementById('totalIncome').textContent = formatCurrency(stats.totalIncome);
         document.getElementById('avgDailySpend').textContent = formatCurrency(stats.averageDailySpend);
         document.getElementById('topCategory').textContent = stats.topCategory;
         document.getElementById('recurringTotal').textContent = formatCurrency(stats.recurringTotal);
+        
+        updateIncomeSummary(stats.totalIncome, stats.totalExpenses);
     }
 
     function calculateStats() {
         let totalExpenses = 0;
+        let totalIncome = 0;
         let categoryTotals = {};
         let recurringTotal = 0;
         
@@ -524,6 +558,8 @@
                 if (t.isRecurring) {
                     recurringTotal += Math.abs(t.amount);
                 }
+            } else if (t.amount > 0 && t.category === 'Income') {
+                totalIncome += t.amount;
             }
         });
 
@@ -535,16 +571,38 @@
 
         return {
             totalExpenses,
+            totalIncome,
             averageDailySpend,
             topCategory,
             recurringTotal
         };
     }
 
+    function updateIncomeSummary(income, expenses) {
+        const netIncome = income - expenses;
+        const savingsRate = (income > 0) ? ((income - expenses) / income * 100) : 0;
+        
+        document.getElementById('incomeSummary').innerHTML = `
+            <div class="income-stats">
+                <div>Total Income: <span class="income">${formatCurrency(income)}</span></div>
+                <div>Net Income: <span class="${netIncome >= 0 ? 'income' : 'expense'}">${formatCurrency(netIncome)}</span></div>
+                <div>Savings Rate: ${savingsRate.toFixed(1)}%</div>
+            </div>
+        `;
+    }
+
     function generateInsights() {
         const insights = [];
+        const stats = calculateStats();
         
-        // Analyze spending patterns
+        // Income vs Expenses
+        const netIncome = stats.totalIncome - stats.totalExpenses;
+        insights.push({
+            type: 'summary',
+            message: `Your net ${netIncome >= 0 ? 'income' : 'spending'} this period is ${formatCurrency(Math.abs(netIncome))}`
+        });
+
+        // Spending patterns
         const weekdaySpending = analyzeWeekdaySpending();
         const highestSpendingDay = Object.entries(weekdaySpending)
             .sort((a, b) => b[1] - a[1])[0];
@@ -557,20 +615,7 @@
             });
         }
 
-        // Find large transactions
-        const largeTransactions = transactions
-            .filter(t => t.amount < -100)
-            .sort((a, b) => a.amount - b.amount);
-            
-        if (largeTransactions.length > 0) {
-            insights.push({
-                type: 'alert',
-                message: `Your largest expense was ${formatCurrency(Math.abs(largeTransactions[0].amount))} 
-                         at ${largeTransactions[0].description}`
-            });
-        }
-
-        // Category spending analysis
+        // Category analysis
         const categorySpending = {};
         let totalSpending = 0;
         transactions.forEach(t => {
@@ -735,7 +780,6 @@
     function updateWeekdaySpendingChart() {
         const ctx = document.getElementById('weekdaySpendingChart').getContext('2d');
         const weekdaySpending = analyzeWeekdaySpending();
-
         const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
         const data = weekdays.map(day => weekdaySpending[day] || 0);
 
@@ -787,6 +831,34 @@
         return weekdayTotals;
     }
 
+    function captureAndDownload() {
+        // Capture both stats and charts
+        Promise.all([
+            html2canvas(document.querySelector('.stats-grid')),
+            html2canvas(document.getElementById('chartsTab'))
+        ]).then(([statsCanvas, chartsCanvas]) => {
+            // Create a combined canvas
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size
+            canvas.width = Math.max(statsCanvas.width, chartsCanvas.width);
+            canvas.height = statsCanvas.height + chartsCanvas.height;
+            
+            // Draw both canvases
+            ctx.fillStyle = '#f5f5f5';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(statsCanvas, 0, 0);
+            ctx.drawImage(chartsCanvas, 0, statsCanvas.height);
+            
+            // Download the combined image
+            const link = document.createElement('a');
+            link.download = 'budget-summary.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+    }
+
     function exportSummary() {
         const stats = calculateStats();
         const insights = document.getElementById('insightsList').innerText;
@@ -794,7 +866,9 @@
         const summary = `
 Budget Summary (${new Date().toLocaleDateString()})
 
+Total Income: ${formatCurrency(stats.totalIncome)}
 Total Expenses: ${formatCurrency(stats.totalExpenses)}
+Net Income: ${formatCurrency(stats.totalIncome - stats.totalExpenses)}
 Average Daily Spend: ${formatCurrency(stats.averageDailySpend)}
 Top Category: ${stats.topCategory}
 Recurring Expenses: ${formatCurrency(stats.recurringTotal)}
@@ -807,15 +881,6 @@ Generated from Budget Tracker
 
         const mailtoLink = `mailto:?subject=Budget Summary&body=${encodeURIComponent(summary)}`;
         window.location.href = mailtoLink;
-    }
-
-    function captureAndDownload() {
-        html2canvas(document.getElementById('chartsTab')).then(canvas => {
-            const link = document.createElement('a');
-            link.download = 'budget-summary.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        });
     }
 
     function formatCurrency(amount) {
@@ -866,4 +931,3 @@ Generated from Budget Tracker
     });
 </script>
 ```
-
