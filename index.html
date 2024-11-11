@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Budget Tracker</title>
+    <!-- Load external libraries first -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
@@ -136,9 +137,6 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        .export-button:hover {
-            background: #0056b3;
-        }
         select, button, input {
             padding: 8px;
             border: 1px solid #ddd;
@@ -195,6 +193,10 @@
             background: #f8f9fa;
             border-radius: 4px;
             border-left: 4px solid #007bff;
+        }
+        .chart-wrapper {
+            position: relative;
+            min-height: 300px;
         }
     </style>
 </head>
@@ -267,12 +269,18 @@
         <div id="chartsTab">
             <div class="charts">
                 <div class="chart-container">
-                    <canvas id="expensesPieChart"></canvas>
-                    <div id="pieChartLoading" class="loading">Upload data to see spending distribution</div>
+                    <h3>Expenses by Category</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="expensesPieChart"></canvas>
+                        <div id="pieChartLoading" class="loading">Upload data to see spending distribution</div>
+                    </div>
                 </div>
                 <div class="chart-container">
-                    <canvas id="categoryBarChart"></canvas>
-                    <div id="barChartLoading" class="loading">Upload data to see category breakdown</div>
+                    <h3>Category Breakdown</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="categoryBarChart"></canvas>
+                        <div id="barChartLoading" class="loading">Upload data to see category breakdown</div>
+                    </div>
                 </div>
                 
                 <div class="insights-container">
@@ -281,18 +289,23 @@
                 </div>
 
                 <div class="chart-container">
-                    <canvas id="trendLineChart"></canvas>
-                    <div id="trendChartLoading" class="loading">Upload data to see spending trends</div>
+                    <h3>Spending Trends</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="trendLineChart"></canvas>
+                        <div id="trendChartLoading" class="loading">Upload data to see spending trends</div>
+                    </div>
                 </div>
                 <div class="chart-container">
-                    <canvas id="weekdaySpendingChart"></canvas>
-                    <div id="weekdayChartLoading" class="loading">Upload data to see daily patterns</div>
+                    <h3>Daily Patterns</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="weekdaySpendingChart"></canvas>
+                        <div id="weekdayChartLoading" class="loading">Upload data to see daily patterns</div>
+                    </div>
                 </div>
                 
                 <div class="chart-container income-summary">
                     <h3>Income Summary</h3>
                     <div id="incomeSummary"></div>
-                    <canvas id="incomeChart"></canvas>
                 </div>
             </div>
             
@@ -327,6 +340,7 @@
 </html>
 ```html
 <script>
+    // Global variables
     let transactions = [];
     let charts = {};
     let savedCategories = JSON.parse(localStorage.getItem('savedCategories') || '{}');
@@ -349,6 +363,17 @@
         'Alcohol & Bars': ['Bars', 'Liquor Stores'],
         'Fees & Interest': ['Bank Fees', 'Interest', 'Late Fees']
     };
+
+    // Initialize when the document loads
+    document.addEventListener('DOMContentLoaded', function() {
+        updateCharts();
+        initializeDisplay();
+        
+        // Add data clearing on page unload
+        window.onbeforeunload = function() {
+            transactions = [];
+        };
+    });
 
     function togglePrivacyNotice() {
         const content = document.getElementById('privacyContent');
@@ -396,14 +421,14 @@
             if (!date || !amount) continue;
 
             const parsedAmount = parseFloat(amount);
-            const category = autoCategorizeTransaction(description);
+            const category = parsedAmount > 0 ? 'Income' : autoCategorizeTransaction(description);
             const isRecurring = detectRecurring(description);
             
             transactions.push({
                 date: date,
                 description: description,
                 amount: parsedAmount,
-                category: parsedAmount > 0 ? 'Income' : category,
+                category: category,
                 isRecurring: isRecurring
             });
         }
@@ -525,8 +550,14 @@
         transactions[index].isRecurring = isRecurring === 'true';
         analyzeTransactions();
     }
+
+    function saveCategories() {
+        localStorage.setItem('savedCategories', JSON.stringify(savedCategories));
+        alert('Categories saved successfully!');
+    }
 </script>
-``````html
+```
+```html
 <script>
     function analyzeTransactions() {
         updateStats();
@@ -639,6 +670,15 @@
             });
         }
 
+        // Add savings insight if we have income
+        if (stats.totalIncome > 0) {
+            const savingsRate = ((stats.totalIncome - stats.totalExpenses) / stats.totalIncome * 100).toFixed(1);
+            insights.push({
+                type: 'info',
+                message: `Your savings rate is ${savingsRate}% of your income`
+            });
+        }
+
         // Update insights display
         const insightsList = document.getElementById('insightsList');
         insightsList.innerHTML = insights.map(insight => `
@@ -649,6 +689,7 @@
     }
 
     function updateCharts() {
+        hideLoadingMessages();
         updatePieChart();
         updateBarChart();
         updateTrendLineChart();
@@ -680,13 +721,15 @@
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
-                    title: {
-                        display: true,
-                        text: 'Expenses by Category'
-                    },
                     legend: {
-                        position: 'right'
+                        position: 'right',
+                        labels: {
+                            font: {
+                                size: 12
+                            }
+                        }
                     }
                 }
             }
@@ -703,28 +746,30 @@
             }
         });
 
+        const sortedCategories = Object.entries(expensesByCategory)
+            .sort((a, b) => b[1] - a[1])
+            .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
+
         if (charts.barChart) charts.barChart.destroy();
         charts.barChart = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: Object.keys(expensesByCategory),
+                labels: Object.keys(sortedCategories),
                 datasets: [{
                     label: 'Total Spent',
-                    data: Object.values(expensesByCategory),
+                    data: Object.values(sortedCategories),
                     backgroundColor: '#36a2eb'
                 }]
             },
             options: {
                 responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Spending by Category'
-                    }
-                },
+                maintainAspectRatio: false,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => '$' + value.toFixed(2)
+                        }
                     }
                 }
             }
@@ -762,15 +807,13 @@
             },
             options: {
                 responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Daily Spending Trend'
-                    }
-                },
+                maintainAspectRatio: false,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => '$' + value.toFixed(2)
+                        }
                     }
                 }
             }
@@ -796,15 +839,13 @@
             },
             options: {
                 responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Average Spending by Day of Week'
-                    }
-                },
+                maintainAspectRatio: false,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => '$' + value.toFixed(2)
+                        }
                     }
                 }
             }
@@ -831,32 +872,20 @@
         return weekdayTotals;
     }
 
-    function captureAndDownload() {
-        // Capture both stats and charts
-        Promise.all([
-            html2canvas(document.querySelector('.stats-grid')),
-            html2canvas(document.getElementById('chartsTab'))
-        ]).then(([statsCanvas, chartsCanvas]) => {
-            // Create a combined canvas
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // Set canvas size
-            canvas.width = Math.max(statsCanvas.width, chartsCanvas.width);
-            canvas.height = statsCanvas.height + chartsCanvas.height;
-            
-            // Draw both canvases
-            ctx.fillStyle = '#f5f5f5';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(statsCanvas, 0, 0);
-            ctx.drawImage(chartsCanvas, 0, statsCanvas.height);
-            
-            // Download the combined image
-            const link = document.createElement('a');
-            link.download = 'budget-summary.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+    function formatCurrency(amount) {
+        return '$' + Math.abs(amount).toFixed(2);
+    }
+
+    function showTab(tabName) {
+        document.querySelectorAll('[id$="Tab"]').forEach(tab => {
+            tab.style.display = 'none';
         });
+        document.getElementById(tabName + 'Tab').style.display = 'block';
+
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
     }
 
     function exportSummary() {
@@ -883,20 +912,32 @@ Generated from Budget Tracker
         window.location.href = mailtoLink;
     }
 
-    function formatCurrency(amount) {
-        return '$' + Math.abs(amount).toFixed(2);
+    function captureAndDownload() {
+        Promise.all([
+            html2canvas(document.querySelector('.stats-grid')),
+            html2canvas(document.getElementById('chartsTab'))
+        ]).then(([statsCanvas, chartsCanvas]) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = Math.max(statsCanvas.width, chartsCanvas.width);
+            canvas.height = statsCanvas.height + chartsCanvas.height + 20; // Added padding
+            
+            ctx.fillStyle = '#f5f5f5';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(statsCanvas, 0, 0);
+            ctx.drawImage(chartsCanvas, 0, statsCanvas.height + 20);
+            
+            const link = document.createElement('a');
+            link.download = 'budget-summary.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
     }
 
-    function showTab(tabName) {
-        document.querySelectorAll('[id$="Tab"]').forEach(tab => {
-            tab.style.display = 'none';
-        });
-        document.getElementById(tabName + 'Tab').style.display = 'block';
-
-        document.querySelectorAll('.tab-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        event.target.classList.add('active');
+    function initializeDisplay() {
+        populateCategoryFilter();
+        filterTransactions();
     }
 
     function populateCategoryFilter() {
@@ -911,23 +952,5 @@ Generated from Budget Tracker
             select.appendChild(option);
         });
     }
-
-    function initializeDisplay() {
-        populateCategoryFilter();
-        filterTransactions();
-        analyzeTransactions();
-    }
-
-    // Initialize when the document loads
-    document.addEventListener('DOMContentLoaded', function() {
-        updateCharts();
-        
-        // Add data clearing on page unload
-        window.onbeforeunload = function() {
-            transactions = [];
-            // Uncomment below if you want to clear saved categories too
-            // localStorage.removeItem('savedCategories');
-        };
-    });
 </script>
 ```
