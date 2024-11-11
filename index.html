@@ -107,6 +107,7 @@
         }
         .income-summary {
             grid-column: span 2;
+            margin-top: 20px;
         }
         .income-stats {
             display: grid;
@@ -196,7 +197,15 @@
         }
         .chart-wrapper {
             position: relative;
-            min-height: 300px;
+            height: 300px;
+            width: 100%;
+        }
+        .debug-info {
+            background: #fff3cd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            display: none;
         }
     </style>
 </head>
@@ -258,6 +267,9 @@
                 <div id="recurringTotal" class="stat-value expense">$0</div>
             </div>
         </div>
+
+        <!-- Debug Info -->
+        <div id="debugInfo" class="debug-info"></div>
 
         <div class="tab-container">
             <div class="tab-buttons">
@@ -345,6 +357,18 @@
     let charts = {};
     let savedCategories = JSON.parse(localStorage.getItem('savedCategories') || '{}');
 
+    // Debug logger
+    function debugLog(message, data = null) {
+        console.log(message, data);
+        const debugInfo = document.getElementById('debugInfo');
+        debugInfo.style.display = 'block';
+        debugInfo.innerHTML += `<div>${message}</div>`;
+        setTimeout(() => {
+            debugInfo.style.display = 'none';
+            debugInfo.innerHTML = '';
+        }, 5000);
+    }
+
     // Enhanced categories with subcategories
     const categories = {
         'Income': ['Salary', 'Transfers In', 'Refunds', 'Other Income'],
@@ -366,13 +390,14 @@
 
     // Initialize when the document loads
     document.addEventListener('DOMContentLoaded', function() {
-        updateCharts();
-        initializeDisplay();
-        
-        // Add data clearing on page unload
-        window.onbeforeunload = function() {
-            transactions = [];
-        };
+        debugLog('Application initialized');
+        try {
+            initializeDisplay();
+            // Initialize empty charts
+            updateCharts();
+        } catch (error) {
+            debugLog('Error during initialization:', error);
+        }
     });
 
     function togglePrivacyNotice() {
@@ -388,6 +413,7 @@
     }
 
     function processFile() {
+        debugLog('Starting file processing');
         const file = document.getElementById('csvFile').files[0];
         if (!file) {
             alert('Please select a file first.');
@@ -396,10 +422,18 @@
 
         const reader = new FileReader();
         reader.onload = function(e) {
-            parseTransactions(e.target.result);
-            initializeDisplay();
-            analyzeTransactions();
-            hideLoadingMessages();
+            try {
+                parseTransactions(e.target.result);
+                initializeDisplay();
+                analyzeTransactions();
+                hideLoadingMessages();
+                debugLog('File processed successfully');
+            } catch (error) {
+                debugLog('Error processing file:', error);
+            }
+        };
+        reader.onerror = function(error) {
+            debugLog('Error reading file:', error);
         };
         reader.readAsText(file);
     }
@@ -411,6 +445,7 @@
     }
 
     function parseTransactions(csv) {
+        debugLog('Parsing CSV data');
         const lines = csv.split('\n');
         transactions = [];
         
@@ -421,6 +456,11 @@
             if (!date || !amount) continue;
 
             const parsedAmount = parseFloat(amount);
+            if (isNaN(parsedAmount)) {
+                debugLog('Invalid amount found:', { line: i, amount });
+                continue;
+            }
+
             const category = parsedAmount > 0 ? 'Income' : autoCategorizeTransaction(description);
             const isRecurring = detectRecurring(description);
             
@@ -432,6 +472,23 @@
                 isRecurring: isRecurring
             });
         }
+        debugLog(`Parsed ${transactions.length} transactions`);
+    }
+
+    function exportData() {
+        debugLog('Exporting data');
+        const data = {
+            transactions: transactions,
+            categories: savedCategories,
+            stats: calculateStats()
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'budget-data.json';
+        link.click();
     }
 
     function autoCategorizeTransaction(description) {
@@ -479,6 +536,7 @@
     }
 
     function filterTransactions() {
+        debugLog('Filtering transactions');
         const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
         const categoryFilter = document.getElementById('categoryFilter')?.value;
         const amountFilter = document.getElementById('amountFilter')?.value;
@@ -508,6 +566,7 @@
     }
 
     function displayTransactions(transactionsToDisplay = transactions) {
+        debugLog('Displaying transactions');
         const container = document.getElementById('transactions');
         container.innerHTML = `
             <div class="transaction-row">
@@ -553,16 +612,22 @@
 
     function saveCategories() {
         localStorage.setItem('savedCategories', JSON.stringify(savedCategories));
+        debugLog('Categories saved successfully');
         alert('Categories saved successfully!');
     }
 </script>
-```
-```html
+``````html
 <script>
     function analyzeTransactions() {
-        updateStats();
-        generateInsights();
-        updateCharts();
+        debugLog('Starting transaction analysis');
+        try {
+            updateStats();
+            generateInsights();
+            updateCharts();
+            debugLog('Analysis complete');
+        } catch (error) {
+            debugLog('Error during analysis:', error);
+        }
     }
 
     function updateStats() {
@@ -622,7 +687,212 @@
         `;
     }
 
+    function updateCharts() {
+        debugLog('Updating charts');
+        try {
+            if (transactions.length === 0) {
+                debugLog('No transactions to chart');
+                return;
+            }
+            
+            hideLoadingMessages();
+            updatePieChart();
+            updateBarChart();
+            updateTrendLineChart();
+            updateWeekdaySpendingChart();
+            debugLog('Charts updated successfully');
+        } catch (error) {
+            debugLog('Error updating charts:', error);
+        }
+    }
+
+    function updatePieChart() {
+        const ctx = document.getElementById('expensesPieChart').getContext('2d');
+        if (!ctx) {
+            debugLog('Pie chart canvas not found');
+            return;
+        }
+
+        const expensesByCategory = {};
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
+            }
+        });
+
+        if (charts.pieChart) {
+            charts.pieChart.destroy();
+        }
+
+        charts.pieChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: Object.keys(expensesByCategory),
+                datasets: [{
+                    data: Object.values(expensesByCategory),
+                    backgroundColor: [
+                        '#ff6384', '#36a2eb', '#cc65fe', '#ffce56', '#4bc0c0',
+                        '#ff9f40', '#c9cbcf', '#9966ff', '#ff99cc', '#66ff99'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            font: {
+                                size: 12
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateBarChart() {
+        const ctx = document.getElementById('categoryBarChart').getContext('2d');
+        if (!ctx) {
+            debugLog('Bar chart canvas not found');
+            return;
+        }
+
+        const expensesByCategory = {};
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
+            }
+        });
+
+        const sortedCategories = Object.entries(expensesByCategory)
+            .sort((a, b) => b[1] - a[1])
+            .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
+
+        if (charts.barChart) {
+            charts.barChart.destroy();
+        }
+
+        charts.barChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(sortedCategories),
+                datasets: [{
+                    label: 'Total Spent',
+                    data: Object.values(sortedCategories),
+                    backgroundColor: '#36a2eb'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => '$' + value.toFixed(2)
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateTrendLineChart() {
+        const ctx = document.getElementById('trendLineChart').getContext('2d');
+        if (!ctx) {
+            debugLog('Trend chart canvas not found');
+            return;
+        }
+
+        const dailyTotals = {};
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                if (!dailyTotals[t.date]) {
+                    dailyTotals[t.date] = 0;
+                }
+                dailyTotals[t.date] += Math.abs(t.amount);
+            }
+        });
+
+        const sortedDates = Object.keys(dailyTotals).sort();
+        const sortedTotals = sortedDates.map(date => dailyTotals[date]);
+
+        if (charts.trendChart) {
+            charts.trendChart.destroy();
+        }
+
+        charts.trendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sortedDates,
+                datasets: [{
+                    label: 'Daily Spending',
+                    data: sortedTotals,
+                    borderColor: '#4bc0c0',
+                    tension: 0.1,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => '$' + value.toFixed(2)
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateWeekdaySpendingChart() {
+        const ctx = document.getElementById('weekdaySpendingChart').getContext('2d');
+        if (!ctx) {
+            debugLog('Weekday chart canvas not found');
+            return;
+        }
+
+        const weekdaySpending = analyzeWeekdaySpending();
+        const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const data = weekdays.map(day => weekdaySpending[day] || 0);
+
+        if (charts.weekdayChart) {
+            charts.weekdayChart.destroy();
+        }
+
+        charts.weekdayChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: weekdays,
+                datasets: [{
+                    label: 'Average Spending',
+                    data: data,
+                    backgroundColor: '#cc65fe'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => '$' + value.toFixed(2)
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     function generateInsights() {
+        debugLog('Generating insights');
         const insights = [];
         const stats = calculateStats();
         
@@ -688,170 +958,6 @@
         `).join('');
     }
 
-    function updateCharts() {
-        hideLoadingMessages();
-        updatePieChart();
-        updateBarChart();
-        updateTrendLineChart();
-        updateWeekdaySpendingChart();
-    }
-
-    function updatePieChart() {
-        const ctx = document.getElementById('expensesPieChart').getContext('2d');
-        const expensesByCategory = {};
-        
-        transactions.forEach(t => {
-            if (t.amount < 0 && t.category !== 'Transfers') {
-                expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
-            }
-        });
-
-        if (charts.pieChart) charts.pieChart.destroy();
-        charts.pieChart = new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: Object.keys(expensesByCategory),
-                datasets: [{
-                    data: Object.values(expensesByCategory),
-                    backgroundColor: [
-                        '#ff6384', '#36a2eb', '#cc65fe', '#ffce56', '#4bc0c0',
-                        '#ff9f40', '#c9cbcf', '#9966ff', '#ff99cc', '#66ff99'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: {
-                            font: {
-                                size: 12
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function updateBarChart() {
-        const ctx = document.getElementById('categoryBarChart').getContext('2d');
-        const expensesByCategory = {};
-        
-        transactions.forEach(t => {
-            if (t.amount < 0 && t.category !== 'Transfers') {
-                expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
-            }
-        });
-
-        const sortedCategories = Object.entries(expensesByCategory)
-            .sort((a, b) => b[1] - a[1])
-            .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
-
-        if (charts.barChart) charts.barChart.destroy();
-        charts.barChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: Object.keys(sortedCategories),
-                datasets: [{
-                    label: 'Total Spent',
-                    data: Object.values(sortedCategories),
-                    backgroundColor: '#36a2eb'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: value => '$' + value.toFixed(2)
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function updateTrendLineChart() {
-        const ctx = document.getElementById('trendLineChart').getContext('2d');
-        const dailyTotals = {};
-        
-        transactions.forEach(t => {
-            if (t.amount < 0 && t.category !== 'Transfers') {
-                if (!dailyTotals[t.date]) {
-                    dailyTotals[t.date] = 0;
-                }
-                dailyTotals[t.date] += Math.abs(t.amount);
-            }
-        });
-
-        const sortedDates = Object.keys(dailyTotals).sort();
-        const sortedTotals = sortedDates.map(date => dailyTotals[date]);
-
-        if (charts.trendChart) charts.trendChart.destroy();
-        charts.trendChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: sortedDates,
-                datasets: [{
-                    label: 'Daily Spending',
-                    data: sortedTotals,
-                    borderColor: '#4bc0c0',
-                    tension: 0.1,
-                    fill: false
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: value => '$' + value.toFixed(2)
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function updateWeekdaySpendingChart() {
-        const ctx = document.getElementById('weekdaySpendingChart').getContext('2d');
-        const weekdaySpending = analyzeWeekdaySpending();
-        const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-        const data = weekdays.map(day => weekdaySpending[day] || 0);
-
-        if (charts.weekdayChart) charts.weekdayChart.destroy();
-        charts.weekdayChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: weekdays,
-                datasets: [{
-                    label: 'Average Spending',
-                    data: data,
-                    backgroundColor: '#cc65fe'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: value => '$' + value.toFixed(2)
-                        }
-                    }
-                }
-            }
-        });
-    }
-
     function analyzeWeekdaySpending() {
         const weekdayTotals = {};
         const weekdayCounts = {};
@@ -886,58 +992,26 @@
             btn.classList.remove('active');
         });
         event.target.classList.add('active');
-    }
 
-    function exportSummary() {
-        const stats = calculateStats();
-        const insights = document.getElementById('insightsList').innerText;
-        
-        const summary = `
-Budget Summary (${new Date().toLocaleDateString()})
-
-Total Income: ${formatCurrency(stats.totalIncome)}
-Total Expenses: ${formatCurrency(stats.totalExpenses)}
-Net Income: ${formatCurrency(stats.totalIncome - stats.totalExpenses)}
-Average Daily Spend: ${formatCurrency(stats.averageDailySpend)}
-Top Category: ${stats.topCategory}
-Recurring Expenses: ${formatCurrency(stats.recurringTotal)}
-
-Key Insights:
-${insights}
-
-Generated from Budget Tracker
-`;
-
-        const mailtoLink = `mailto:?subject=Budget Summary&body=${encodeURIComponent(summary)}`;
-        window.location.href = mailtoLink;
-    }
-
-    function captureAndDownload() {
-        Promise.all([
-            html2canvas(document.querySelector('.stats-grid')),
-            html2canvas(document.getElementById('chartsTab'))
-        ]).then(([statsCanvas, chartsCanvas]) => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = Math.max(statsCanvas.width, chartsCanvas.width);
-            canvas.height = statsCanvas.height + chartsCanvas.height + 20; // Added padding
-            
-            ctx.fillStyle = '#f5f5f5';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(statsCanvas, 0, 0);
-            ctx.drawImage(chartsCanvas, 0, statsCanvas.height + 20);
-            
-            const link = document.createElement('a');
-            link.download = 'budget-summary.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        });
+        // Redraw charts when switching to charts tab
+        if (tabName === 'charts') {
+            setTimeout(() => {
+                updateCharts();
+            }, 100);
+        }
     }
 
     function initializeDisplay() {
-        populateCategoryFilter();
-        filterTransactions();
+        debugLog('Initializing display');
+        try {
+            populateCategoryFilter();
+            filterTransactions();
+            if (transactions.length > 0) {
+                analyzeTransactions();
+            }
+        } catch (error) {
+            debugLog('Error initializing display:', error);
+        }
     }
 
     function populateCategoryFilter() {
