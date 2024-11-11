@@ -114,6 +114,9 @@
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
         }
         .transaction-row {
             display: grid;
@@ -137,6 +140,9 @@
             border: none;
             border-radius: 4px;
             cursor: pointer;
+        }
+        .export-button:hover {
+            background: #0056b3;
         }
         select, button, input {
             padding: 8px;
@@ -190,7 +196,7 @@
         }
         .insight-item {
             margin: 10px 0;
-            padding: 10px;
+            padding: 15px;
             background: #f8f9fa;
             border-radius: 4px;
             border-left: 4px solid #007bff;
@@ -244,7 +250,6 @@
                 </select>
             </div>
             <div>
-                <button onclick="exportData()">Export Analysis</button>
                 <button onclick="saveCategories()">Save Categories</button>
             </div>
         </div>
@@ -393,7 +398,6 @@
         debugLog('Application initialized');
         try {
             initializeDisplay();
-            // Initialize empty charts
             updateCharts();
         } catch (error) {
             debugLog('Error during initialization:', error);
@@ -430,10 +434,12 @@
                 debugLog('File processed successfully');
             } catch (error) {
                 debugLog('Error processing file:', error);
+                alert('Error processing file. Please check the format and try again.');
             }
         };
         reader.onerror = function(error) {
             debugLog('Error reading file:', error);
+            alert('Error reading file. Please try again.');
         };
         reader.readAsText(file);
     }
@@ -475,22 +481,6 @@
         debugLog(`Parsed ${transactions.length} transactions`);
     }
 
-    function exportData() {
-        debugLog('Exporting data');
-        const data = {
-            transactions: transactions,
-            categories: savedCategories,
-            stats: calculateStats()
-        };
-        
-        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'budget-data.json';
-        link.click();
-    }
-
     function autoCategorizeTransaction(description) {
         // Use saved categories first
         const saved = savedCategories[description];
@@ -529,7 +519,10 @@
             /power/i,
             /internet/i,
             /netflix/i,
-            /spotify/i
+            /mortgage/i,
+            /rent/i,
+            /spotify/i,
+            /subscription/i
         ];
 
         return recurringPatterns.some(pattern => pattern.test(description));
@@ -616,7 +609,7 @@
         alert('Categories saved successfully!');
     }
 </script>
-``````html
+```html
 <script>
     function analyzeTransactions() {
         debugLog('Starting transaction analysis');
@@ -678,13 +671,116 @@
         const netIncome = income - expenses;
         const savingsRate = (income > 0) ? ((income - expenses) / income * 100) : 0;
         
-        document.getElementById('incomeSummary').innerHTML = `
-            <div class="income-stats">
-                <div>Total Income: <span class="income">${formatCurrency(income)}</span></div>
-                <div>Net Income: <span class="${netIncome >= 0 ? 'income' : 'expense'}">${formatCurrency(netIncome)}</span></div>
-                <div>Savings Rate: ${savingsRate.toFixed(1)}%</div>
-            </div>
-        `;
+        const incomeSummary = document.getElementById('incomeSummary');
+        if (!incomeSummary) return;
+        
+        if (income > 0 || expenses > 0) {
+            incomeSummary.innerHTML = `
+                <div class="income-stats">
+                    <div>Total Income: <span class="income">${formatCurrency(income)}</span></div>
+                    <div>Total Expenses: <span class="expense">${formatCurrency(expenses)}</span></div>
+                    <div>Net Income: <span class="${netIncome >= 0 ? 'income' : 'expense'}">${formatCurrency(netIncome)}</span></div>
+                    <div>Savings Rate: <span>${savingsRate.toFixed(1)}%</span></div>
+                </div>
+            `;
+        } else {
+            incomeSummary.innerHTML = '<div class="income-stats">Upload your transactions to see income summary</div>';
+        }
+    }
+
+    function generateInsights() {
+        debugLog('Generating insights');
+        const insights = [];
+        const stats = calculateStats();
+        
+        // Income vs Expenses
+        const netIncome = stats.totalIncome - stats.totalExpenses;
+        if (stats.totalIncome > 0 || stats.totalExpenses > 0) {
+            insights.push({
+                type: 'summary',
+                message: `Your net ${netIncome >= 0 ? 'income' : 'spending'} this period is ${formatCurrency(Math.abs(netIncome))}`
+            });
+        }
+
+        // Large transactions
+        const largeTransactions = transactions
+            .filter(t => t.amount < -100)
+            .sort((a, b) => a.amount - b.amount);
+            
+        if (largeTransactions.length > 0) {
+            insights.push({
+                type: 'alert',
+                message: `Your largest expense was ${formatCurrency(Math.abs(largeTransactions[0].amount))} 
+                         at ${largeTransactions[0].description}`
+            });
+        }
+
+        // Category analysis
+        const categorySpending = {};
+        let totalSpending = 0;
+        transactions.forEach(t => {
+            if (t.amount < 0 && t.category !== 'Transfers') {
+                categorySpending[t.category] = (categorySpending[t.category] || 0) + Math.abs(t.amount);
+                totalSpending += Math.abs(t.amount);
+            }
+        });
+
+        const topCategories = Object.entries(categorySpending)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3);
+
+        if (topCategories.length > 0) {
+            insights.push({
+                type: 'summary',
+                message: `Top spending categories: 
+                         ${topCategories.map(([cat, amount]) => 
+                             `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
+                         ).join(', ')}`
+            });
+        }
+
+        // Spending patterns
+        const weekdaySpending = analyzeWeekdaySpending();
+        const highestSpendingDay = Object.entries(weekdaySpending)
+            .sort((a, b) => b[1] - a[1])[0];
+                
+        if (highestSpendingDay) {
+            insights.push({
+                type: 'pattern',
+                message: `Highest spending day is ${highestSpendingDay[0]} 
+                         averaging ${formatCurrency(highestSpendingDay[1])}`
+            });
+        }
+
+        // Savings insight
+        if (stats.totalIncome > 0) {
+            const savingsRate = ((stats.totalIncome - stats.totalExpenses) / stats.totalIncome * 100).toFixed(1);
+            insights.push({
+                type: 'info',
+                message: `Your savings rate is ${savingsRate}% of income`
+            });
+        }
+
+        // Recurring expenses insight
+        if (stats.recurringTotal > 0) {
+            insights.push({
+                type: 'info',
+                message: `Recurring expenses total ${formatCurrency(stats.recurringTotal)} 
+                         (${((stats.recurringTotal/stats.totalExpenses)*100).toFixed(1)}% of spending)`
+            });
+        }
+
+        // Update insights display
+        const insightsList = document.getElementById('insightsList');
+        if (insights.length > 0) {
+            insightsList.innerHTML = insights.map(insight => `
+                <div class="insight-item ${insight.type}">
+                    ${insight.message}
+                </div>
+            `).join('');
+        } else {
+            insightsList.innerHTML = '<div class="insight-item">Upload your transactions to see insights</div>';
+        }
     }
 
     function updateCharts() {
@@ -891,73 +987,6 @@
         });
     }
 
-    function generateInsights() {
-        debugLog('Generating insights');
-        const insights = [];
-        const stats = calculateStats();
-        
-        // Income vs Expenses
-        const netIncome = stats.totalIncome - stats.totalExpenses;
-        insights.push({
-            type: 'summary',
-            message: `Your net ${netIncome >= 0 ? 'income' : 'spending'} this period is ${formatCurrency(Math.abs(netIncome))}`
-        });
-
-        // Spending patterns
-        const weekdaySpending = analyzeWeekdaySpending();
-        const highestSpendingDay = Object.entries(weekdaySpending)
-            .sort((a, b) => b[1] - a[1])[0];
-                
-        if (highestSpendingDay) {
-            insights.push({
-                type: 'pattern',
-                message: `Your highest spending day is ${highestSpendingDay[0]} 
-                         with an average of ${formatCurrency(highestSpendingDay[1])}`
-            });
-        }
-
-        // Category analysis
-        const categorySpending = {};
-        let totalSpending = 0;
-        transactions.forEach(t => {
-            if (t.amount < 0 && t.category !== 'Transfers') {
-                categorySpending[t.category] = (categorySpending[t.category] || 0) + Math.abs(t.amount);
-                totalSpending += Math.abs(t.amount);
-            }
-        });
-
-        const topCategories = Object.entries(categorySpending)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3);
-
-        if (topCategories.length > 0) {
-            insights.push({
-                type: 'summary',
-                message: `Your top spending categories are: 
-                         ${topCategories.map(([cat, amount]) => 
-                             `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
-                         ).join(', ')}`
-            });
-        }
-
-        // Add savings insight if we have income
-        if (stats.totalIncome > 0) {
-            const savingsRate = ((stats.totalIncome - stats.totalExpenses) / stats.totalIncome * 100).toFixed(1);
-            insights.push({
-                type: 'info',
-                message: `Your savings rate is ${savingsRate}% of your income`
-            });
-        }
-
-        // Update insights display
-        const insightsList = document.getElementById('insightsList');
-        insightsList.innerHTML = insights.map(insight => `
-            <div class="insight-item ${insight.type}">
-                ${insight.message}
-            </div>
-        `).join('');
-    }
-
     function analyzeWeekdaySpending() {
         const weekdayTotals = {};
         const weekdayCounts = {};
@@ -980,6 +1009,62 @@
 
     function formatCurrency(amount) {
         return '$' + Math.abs(amount).toFixed(2);
+    }
+
+    async function captureAndDownload() {
+        debugLog('Starting report capture');
+        try {
+            // Hide buttons temporarily for clean screenshot
+            const exportControls = document.querySelector('.export-controls');
+            exportControls.style.display = 'none';
+            
+            const element = document.getElementById('chartsTab');
+            const canvas = await html2canvas(element, {
+                scale: 2,
+                logging: false,
+                useCORS: true,
+                allowTaint: true
+            });
+            
+            // Show buttons again
+            exportControls.style.display = 'flex';
+            
+            // Download the image
+            const link = document.createElement('a');
+            link.download = `budget-report-${new Date().toLocaleDateString()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            debugLog('Report downloaded successfully');
+        } catch (error) {
+            debugLog('Error capturing report:', error);
+            alert('There was an error generating the report. Please try again.');
+        }
+    }
+
+    function exportSummary() {
+        debugLog('Preparing email summary');
+        const stats = calculateStats();
+        const insights = document.getElementById('insightsList').innerText || 'No insights available';
+        
+        const summary = `
+Budget Summary (${new Date().toLocaleDateString()})
+
+Total Income: ${formatCurrency(stats.totalIncome)}
+Total Expenses: ${formatCurrency(stats.totalExpenses)}
+Net Income: ${formatCurrency(stats.totalIncome - stats.totalExpenses)}
+Average Daily Spend: ${formatCurrency(stats.averageDailySpend)}
+Top Category: ${stats.topCategory}
+Recurring Expenses: ${formatCurrency(stats.recurringTotal)}
+
+Key Insights:
+${insights}
+
+Generated from Budget Tracker
+`;
+
+        const mailtoLink = `mailto:?subject=Budget Summary - ${new Date().toLocaleDateString()}&body=${encodeURIComponent(summary)}`;
+        window.location.href = mailtoLink;
+        debugLog('Email summary prepared');
     }
 
     function showTab(tabName) {
@@ -1027,4 +1112,3 @@
         });
     }
 </script>
-```
