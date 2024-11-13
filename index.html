@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html>
 <head>
@@ -66,6 +67,15 @@
             gap: 20px;
             margin-bottom: 20px;
         }
+        .csv-format-info {
+            margin-top: 8px;
+            color: #666;
+            font-size: 0.9em;
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -105,9 +115,25 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin: 20px 0;
         }
+        .insights-header {
+            background: #ffd700;
+            color: #000;
+            padding: 8px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
         .income-summary {
             grid-column: span 2;
             margin-top: 20px;
+        }
+        .income-summary-header {
+            background: #ffd700;
+            color: #000;
+            padding: 8px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-weight: bold;
         }
         .income-stats {
             display: grid;
@@ -240,6 +266,12 @@
             <div>
                 <input type="file" id="csvFile" accept=".csv">
                 <button onclick="processFile()">Load Statement</button>
+                <div class="csv-format-info">
+                    <strong>Required CSV format:</strong><br>
+                    • Headers: Date, Description, Amount, Balance<br>
+                    • Compatible with ANZ, ASB, and BNZ bank statements<br>
+                    • Amount should be negative for expenses, positive for income
+                </div>
             </div>
             <div>
                 <select id="dateFilter" onchange="filterTransactions()">
@@ -301,7 +333,7 @@
                 </div>
                 
                 <div class="insights-container">
-                    <h3>💡 Key Insights</h3>
+                    <div class="insights-header">💡 Key Insights</div>
                     <div class="insights" id="insightsList"></div>
                 </div>
 
@@ -321,7 +353,7 @@
                 </div>
                 
                 <div class="chart-container income-summary">
-                    <h3>Income Summary</h3>
+                    <div class="income-summary-header">Income Summary</div>
                     <div id="incomeSummary"></div>
                 </div>
             </div>
@@ -404,18 +436,6 @@
         }
     });
 
-    function togglePrivacyNotice() {
-        const content = document.getElementById('privacyContent');
-        const toggle = document.getElementById('privacyToggle');
-        if (content.style.display === 'none') {
-            content.style.display = 'block';
-            toggle.textContent = 'Hide';
-        } else {
-            content.style.display = 'none';
-            toggle.textContent = 'Show';
-        }
-    }
-
     function processFile() {
         debugLog('Starting file processing');
         const file = document.getElementById('csvFile').files[0];
@@ -427,7 +447,22 @@
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
-                parseTransactions(e.target.result);
+                const csv = e.target.result;
+                // Validate CSV format
+                const lines = csv.split('\n');
+                const headers = lines[0].toLowerCase().trim().split(',');
+                const requiredHeaders = ['date', 'description', 'amount', 'balance'];
+                
+                const hasRequiredHeaders = requiredHeaders.every(header => 
+                    headers.some(h => h.trim() === header));
+
+                if (!hasRequiredHeaders) {
+                    alert('Invalid CSV format. Please ensure your bank statement CSV contains: Date, Description, Amount, Balance');
+                    return;
+                }
+
+                parseTransactions(csv);
+                showTab('charts'); // Switch to charts tab
                 initializeDisplay();
                 analyzeTransactions();
                 hideLoadingMessages();
@@ -458,7 +493,7 @@
         for (let i = 1; i < lines.length; i++) {
             if (!lines[i].trim()) continue;
             
-            const [date, description, amount, balance] = lines[i].split(',');
+            const [date, description, amount, balance] = lines[i].split(',').map(field => field.trim());
             if (!date || !amount) continue;
 
             const parsedAmount = parseFloat(amount);
@@ -472,7 +507,7 @@
             
             transactions.push({
                 date: date,
-                description: description,
+                description: description.replace(/;$/, '').trim(), // Remove trailing semicolon if present
                 amount: parsedAmount,
                 category: category,
                 isRecurring: isRecurring
@@ -492,15 +527,16 @@
         const rules = [
             { pattern: /transfer|tfr/i, category: 'Transfers' },
             { pattern: /coffee|cafe|weta/i, category: 'Food & Dining' },
-            { pattern: /pak n save|countdown|new world|woolworths|fresh/i, category: 'Food & Dining' },
+            { pattern: /pak n save|countdown|new world|woolworths|fresh|four square/i, category: 'Food & Dining' },
             { pattern: /pet|vet/i, category: 'Pets' },
-            { pattern: /liquor|brew|bar/i, category: 'Alcohol & Bars' },
+            { pattern: /liquor|brew|bar|vintage bar/i, category: 'Alcohol & Bars' },
             { pattern: /mitre 10|hardware|bunnings/i, category: 'Home' },
             { pattern: /loan|interest|fee/i, category: 'Fees & Interest' },
             { pattern: /z |mobil|fuel|gas/i, category: 'Transportation' },
             { pattern: /medical|pharmacy|doctor|health/i, category: 'Health' },
-            { pattern: /movie|cinema|netflix/i, category: 'Entertainment' },
-            { pattern: /power|electricity|water|internet/i, category: 'Bills & Utilities' }
+            { pattern: /movie|cinema|netflix|thrillseekers/i, category: 'Entertainment' },
+            { pattern: /power|electricity|water|internet/i, category: 'Bills & Utilities' },
+            { pattern: /warehouse|rebel|wholesale/i, category: 'Shopping' }
         ];
 
         for (const rule of rules) {
@@ -522,7 +558,8 @@
             /mortgage/i,
             /rent/i,
             /spotify/i,
-            /subscription/i
+            /subscription/i,
+            /transfer from/i
         ];
 
         return recurringPatterns.some(pattern => pattern.test(description));
@@ -614,10 +651,13 @@
     function analyzeTransactions() {
         debugLog('Starting transaction analysis');
         try {
+            // Update everything in the correct order
             updateStats();
-            generateInsights();
-            updateCharts();
-            debugLog('Analysis complete');
+            setTimeout(() => {
+                generateInsights();
+                updateCharts();
+                debugLog('Analysis complete');
+            }, 100);
         } catch (error) {
             debugLog('Error during analysis:', error);
         }
@@ -655,8 +695,8 @@
         const topCategory = Object.entries(categoryTotals)
             .sort((a, b) => b[1] - a[1])[0]?.[0] || 'None';
 
-        const uniqueDays = new Set(transactions.map(t => t.date)).size;
-        const averageDailySpend = totalExpenses / (uniqueDays || 1);
+        const uniqueDays = new Set(transactions.map(t => t.date)).size || 1;
+        const averageDailySpend = totalExpenses / uniqueDays;
 
         return {
             totalExpenses,
@@ -674,18 +714,14 @@
         const incomeSummary = document.getElementById('incomeSummary');
         if (!incomeSummary) return;
         
-        if (income > 0 || expenses > 0) {
-            incomeSummary.innerHTML = `
-                <div class="income-stats">
-                    <div>Total Income: <span class="income">${formatCurrency(income)}</span></div>
-                    <div>Total Expenses: <span class="expense">${formatCurrency(expenses)}</span></div>
-                    <div>Net Income: <span class="${netIncome >= 0 ? 'income' : 'expense'}">${formatCurrency(netIncome)}</span></div>
-                    <div>Savings Rate: <span>${savingsRate.toFixed(1)}%</span></div>
-                </div>
-            `;
-        } else {
-            incomeSummary.innerHTML = '<div class="income-stats">Upload your transactions to see income summary</div>';
-        }
+        incomeSummary.innerHTML = `
+            <div class="income-stats">
+                <div><strong>Total Income:</strong> <span class="income">${formatCurrency(income)}</span></div>
+                <div><strong>Total Expenses:</strong> <span class="expense">${formatCurrency(expenses)}</span></div>
+                <div><strong>Net Income:</strong> <span class="${netIncome >= 0 ? 'income' : 'expense'}">${formatCurrency(netIncome)}</span></div>
+                <div><strong>Savings Rate:</strong> <span>${savingsRate.toFixed(1)}%</span></div>
+            </div>
+        `;
     }
 
     function generateInsights() {
@@ -695,16 +731,14 @@
         
         // Income vs Expenses
         const netIncome = stats.totalIncome - stats.totalExpenses;
-        if (stats.totalIncome > 0 || stats.totalExpenses > 0) {
-            insights.push({
-                type: 'summary',
-                message: `Your net ${netIncome >= 0 ? 'income' : 'spending'} this period is ${formatCurrency(Math.abs(netIncome))}`
-            });
-        }
+        insights.push({
+            type: 'summary',
+            message: `Your net ${netIncome >= 0 ? 'income' : 'spending'} this period is ${formatCurrency(Math.abs(netIncome))}`
+        });
 
-        // Large transactions
+        // Largest expenses
         const largeTransactions = transactions
-            .filter(t => t.amount < -100)
+            .filter(t => t.amount < -100 && t.category !== 'Transfers')
             .sort((a, b) => a.amount - b.amount);
             
         if (largeTransactions.length > 0) {
@@ -732,14 +766,13 @@
         if (topCategories.length > 0) {
             insights.push({
                 type: 'summary',
-                message: `Top spending categories: 
-                         ${topCategories.map(([cat, amount]) => 
-                             `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
-                         ).join(', ')}`
+                message: `Top spending categories: ${topCategories.map(([cat, amount]) => 
+                    `${cat} (${formatCurrency(amount)} - ${((amount/totalSpending)*100).toFixed(1)}%)`
+                ).join(', ')}`
             });
         }
 
-        // Spending patterns
+        // Daily spending patterns
         const weekdaySpending = analyzeWeekdaySpending();
         const highestSpendingDay = Object.entries(weekdaySpending)
             .sort((a, b) => b[1] - a[1])[0];
@@ -752,16 +785,7 @@
             });
         }
 
-        // Savings insight
-        if (stats.totalIncome > 0) {
-            const savingsRate = ((stats.totalIncome - stats.totalExpenses) / stats.totalIncome * 100).toFixed(1);
-            insights.push({
-                type: 'info',
-                message: `Your savings rate is ${savingsRate}% of income`
-            });
-        }
-
-        // Recurring expenses insight
+        // Recurring expenses
         if (stats.recurringTotal > 0) {
             insights.push({
                 type: 'info',
@@ -772,15 +796,11 @@
 
         // Update insights display
         const insightsList = document.getElementById('insightsList');
-        if (insights.length > 0) {
-            insightsList.innerHTML = insights.map(insight => `
-                <div class="insight-item ${insight.type}">
-                    ${insight.message}
-                </div>
-            `).join('');
-        } else {
-            insightsList.innerHTML = '<div class="insight-item">Upload your transactions to see insights</div>';
-        }
+        insightsList.innerHTML = insights.map(insight => `
+            <div class="insight-item ${insight.type}">
+                ${insight.message}
+            </div>
+        `).join('');
     }
 
     function updateCharts() {
@@ -804,12 +824,8 @@
 
     function updatePieChart() {
         const ctx = document.getElementById('expensesPieChart').getContext('2d');
-        if (!ctx) {
-            debugLog('Pie chart canvas not found');
-            return;
-        }
-
         const expensesByCategory = {};
+        
         transactions.forEach(t => {
             if (t.amount < 0 && t.category !== 'Transfers') {
                 expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
@@ -839,9 +855,7 @@
                     legend: {
                         position: 'right',
                         labels: {
-                            font: {
-                                size: 12
-                            }
+                            font: { size: 12 }
                         }
                     }
                 }
@@ -851,12 +865,8 @@
 
     function updateBarChart() {
         const ctx = document.getElementById('categoryBarChart').getContext('2d');
-        if (!ctx) {
-            debugLog('Bar chart canvas not found');
-            return;
-        }
-
         const expensesByCategory = {};
+        
         transactions.forEach(t => {
             if (t.amount < 0 && t.category !== 'Transfers') {
                 expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + Math.abs(t.amount);
@@ -898,12 +908,8 @@
 
     function updateTrendLineChart() {
         const ctx = document.getElementById('trendLineChart').getContext('2d');
-        if (!ctx) {
-            debugLog('Trend chart canvas not found');
-            return;
-        }
-
         const dailyTotals = {};
+        
         transactions.forEach(t => {
             if (t.amount < 0 && t.category !== 'Transfers') {
                 if (!dailyTotals[t.date]) {
@@ -949,11 +955,6 @@
 
     function updateWeekdaySpendingChart() {
         const ctx = document.getElementById('weekdaySpendingChart').getContext('2d');
-        if (!ctx) {
-            debugLog('Weekday chart canvas not found');
-            return;
-        }
-
         const weekdaySpending = analyzeWeekdaySpending();
         const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
         const data = weekdays.map(day => weekdaySpending[day] || 0);
@@ -1011,40 +1012,9 @@
         return '$' + Math.abs(amount).toFixed(2);
     }
 
-    async function captureAndDownload() {
-        debugLog('Starting report capture');
-        try {
-            // Hide buttons temporarily for clean screenshot
-            const exportControls = document.querySelector('.export-controls');
-            exportControls.style.display = 'none';
-            
-            const element = document.getElementById('chartsTab');
-            const canvas = await html2canvas(element, {
-                scale: 2,
-                logging: false,
-                useCORS: true,
-                allowTaint: true
-            });
-            
-            // Show buttons again
-            exportControls.style.display = 'flex';
-            
-            // Download the image
-            const link = document.createElement('a');
-            link.download = `budget-report-${new Date().toLocaleDateString()}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            debugLog('Report downloaded successfully');
-        } catch (error) {
-            debugLog('Error capturing report:', error);
-            alert('There was an error generating the report. Please try again.');
-        }
-    }
-
     function exportSummary() {
-        debugLog('Preparing email summary');
         const stats = calculateStats();
-        const insights = document.getElementById('insightsList').innerText || 'No insights available';
+        const insights = document.getElementById('insightsList').innerText;
         
         const summary = `
 Budget Summary (${new Date().toLocaleDateString()})
@@ -1064,51 +1034,32 @@ Generated from Budget Tracker
 
         const mailtoLink = `mailto:?subject=Budget Summary - ${new Date().toLocaleDateString()}&body=${encodeURIComponent(summary)}`;
         window.location.href = mailtoLink;
-        debugLog('Email summary prepared');
     }
 
-    function showTab(tabName) {
-        document.querySelectorAll('[id$="Tab"]').forEach(tab => {
-            tab.style.display = 'none';
-        });
-        document.getElementById(tabName + 'Tab').style.display = 'block';
-
-        document.querySelectorAll('.tab-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        event.target.classList.add('active');
-
-        // Redraw charts when switching to charts tab
-        if (tabName === 'charts') {
-            setTimeout(() => {
-                updateCharts();
-            }, 100);
-        }
-    }
-
-    function initializeDisplay() {
-        debugLog('Initializing display');
+    async function captureAndDownload() {
+        debugLog('Starting report capture');
         try {
-            populateCategoryFilter();
-            filterTransactions();
-            if (transactions.length > 0) {
-                analyzeTransactions();
-            }
+            const exportControls = document.querySelector('.export-controls');
+            exportControls.style.display = 'none';
+            
+            const element = document.getElementById('chartsTab');
+            const canvas = await html2canvas(element, {
+                scale: 2,
+                logging: false,
+                useCORS: true,
+                allowTaint: true
+            });
+            
+            exportControls.style.display = 'flex';
+            
+            const link = document.createElement('a');
+            link.download = `budget-report-${new Date().toLocaleDateString()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            debugLog('Report downloaded successfully');
         } catch (error) {
-            debugLog('Error initializing display:', error);
+            debugLog('Error capturing report:', error);
+            alert('There was an error generating the report. Please try again.');
         }
-    }
-
-    function populateCategoryFilter() {
-        const select = document.getElementById('categoryFilter');
-        const uniqueCategories = [...new Set(transactions.map(t => t.category))].sort();
-        
-        select.innerHTML = '<option value="all">All Categories</option>';
-        uniqueCategories.forEach(category => {
-            const option = document.createElement('option');
-            option.value = category;
-            option.textContent = category;
-            select.appendChild(option);
-        });
     }
 </script>
